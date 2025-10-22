@@ -5,30 +5,37 @@
 #include <unordered_map>
 #include <algorithm>
 #include <climits>
-#include <bitset>
 using namespace std;
-
-vector<bool> sieve_primes(int n) {
-    vector<bool> prime(n + 1, true);
-    prime[0] = prime[1] = false;
-    if (n >= 2) {
-        for (int i = 4; i <= n; i += 2) prime[i] = false;
-        for (int i = 3; i * i <= n; i += 2) {
-            if (prime[i]) {
-                for (int j = i * i; j <= n; j += 2 * i) {
-                    prime[j] = false;
-                }
-            }
-        }
-    }
-    return prime;
-}
 
 struct PairHash {
     size_t operator()(const pair<int, int>& p) const {
         return ((size_t)p.first << 20) ^ p.second;
     }
 };
+
+void dijkstra(vector<vector<tuple<int, int>>> &graph, vector<long long> &dist, vector<pair<int, int>> &parent,
+              int source, int dest) {
+    priority_queue<pair<long long, int>, vector<pair<long long, int>>, greater<>> pq;
+
+    pq.push({0, source});
+    dist[source] = 0;
+
+    while (!pq.empty()) {
+        auto [cost, node] = pq.top();
+        pq.pop();
+
+        if (cost > dist[node]) continue;
+
+        for (const auto& [neighbor, weight] : graph[node]) {
+            long long new_cost = cost + weight;
+            if (new_cost < dist[neighbor]) {
+                dist[neighbor] = new_cost;
+                parent[neighbor] = {node, weight};
+                pq.push({new_cost, neighbor});
+            }
+        }
+    }
+}
 
 int main() {
     ios_base::sync_with_stdio(false);
@@ -40,126 +47,31 @@ int main() {
     int source, dest;
     cin >> source >> dest;
 
-    vector<vector<tuple<int, int, int>>> graph(N);
+    vector<vector<tuple<int, int>>> graph(N);
 
     for (int i = 0; i < M; i++) {
         int u, v, w1, w2;
         cin >> u >> v >> w1 >> w2;
-        graph[u].emplace_back(v, w1, w2);
-        graph[v].emplace_back(u, w1, w2);
+        graph[u].emplace_back(v, w1);
+        graph[v].emplace_back(u, w2);
     }
 
-    int max_depth = min(N - 1, max(1000, N / 10));
-    if (max_depth < 0) max_depth = 0;
-    vector<bool> prime = sieve_primes(max_depth + 5);
+    vector<long long> best_dist(N, LLONG_MAX);
+    vector<pair<int, int>> best_parent(N, {-1, -1});
 
-    priority_queue<tuple<long long, int, int>, vector<tuple<long long, int, int>>, greater<>> pq;
+    dijkstra(graph, best_dist, best_parent, source, dest);
 
-    unordered_map<pair<int, int>, long long, PairHash> dist;
-    unordered_map<pair<int, int>, pair<int, int>, PairHash> parent;
-
-    pq.push({0, source, 0});
-    dist[{source, 0}] = 0;
-
-    bitset<100001> visited;
-    visited[source] = true;
-
-    pair<int, int> best_state = {-1, -1};
-    long long best_cost = LLONG_MAX;
-
-    while (!pq.empty()) {
-        auto [cost, node, edge_count] = pq.top();
-        pq.pop();
-
-        if (cost >= best_cost) continue;
-
-        if (node == dest) {
-            if (cost < best_cost) {
-                best_cost = cost;
-                best_state = {node, edge_count};
-            }
-            continue;
-        }
-
-        for (const auto& [neighbor, w1, w2] : graph[node]) {
-            int new_edge_count = edge_count + 1;
-
-            long long edge_cost = (new_edge_count < (int)prime.size() && prime[new_edge_count]) ? 3LL * w2 : (long
-long)w1;
-            long long new_cost = cost + edge_cost;
-
-            if (visited[neighbor]) continue;
-
-            pair<int, int> new_state = {neighbor, new_edge_count};
-            if (!dist.count(new_state) || dist[new_state] > new_cost) {
-                dist[new_state] = new_cost;
-                parent[new_state] = {node, edge_count};
-                pq.push({new_cost, neighbor, new_edge_count});
-            }
-
-            visited[neighbor] = true;
-        }
-    }
-
-    if (best_state.first == -1) {
-        priority_queue<pair<long long, int>, vector<pair<long long, int>>, greater<>> simple_pq;
-        vector<long long> simple_dist(N, LLONG_MAX);
-        vector<int> simple_parent(N, -1);
-
-        simple_pq.push({0, source});
-        simple_dist[source] = 0;
-
-        while (!simple_pq.empty()) {
-            auto [cost, node] = simple_pq.top();
-            simple_pq.pop();
-
-            if (cost > simple_dist[node]) continue;
-            if (node == dest) break;
-
-            for (const auto& [neighbor, w1, w2] : graph[node]) {
-                long long new_cost = cost + min(w1, 3 * w2);
-                if (new_cost < simple_dist[neighbor]) {
-                    simple_dist[neighbor] = new_cost;
-                    simple_parent[neighbor] = node;
-                    simple_pq.push({new_cost, neighbor});
-                }
-            }
-        }
-
-        if (simple_dist[dest] == LLONG_MAX) {
-            cout << 0 << "\n";
-            return 0;
-        }
-
-        vector<int> path;
-        int curr = dest;
-        while (curr != -1) {
-            path.push_back(curr);
-            curr = simple_parent[curr];
-        }
-        reverse(path.begin(), path.end());
-
-        cout << path.size() << "\n";
-        for (size_t i = 0; i < path.size(); i++) {
-            if (i > 0) cout << " ";
-            cout << path[i];
-        }
-        cout << "\n";
+    if (best_dist[dest] == LLONG_MAX) {
+        cout << 0 << "\n";
         return 0;
     }
 
     vector<int> path;
-    pair<int, int> current = best_state;
-
-    while (current.first != -1) {
-        path.push_back(current.first);
-        if (parent.count(current)) {
-            current = parent[current];
-        } else {
-            break;
-        }
+    int curr = dest;
+    while (curr != -1) {
+        path.push_back(curr);
+        curr = best_parent[curr].first;
     }
-
     reverse(path.begin(), path.end());
 
     cout << path.size() << "\n";
