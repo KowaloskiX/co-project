@@ -49,7 +49,7 @@ int main() {
         graph[v].emplace_back(u, w1, w2);
     }
 
-    int max_depth = min(N - 1, max(1000, N / 10));
+    int max_depth = min(N - 1,N);
     if (max_depth < 0) max_depth = 0;
     vector<bool> prime = sieve_primes(max_depth + 5);
 
@@ -73,33 +73,33 @@ int main() {
 
         if (cost >= best_cost) continue;
 
+        if (dist[{node, edge_count}] < cost) continue;
+
         if (node == dest) {
-            if (cost < best_cost) {
-                best_cost = cost;
-                best_state = {node, edge_count};
-            }
+            best_cost = cost;
+            best_state = {node, edge_count};
             continue;
         }
 
         for (const auto& [neighbor, w1, w2] : graph[node]) {
             int new_edge_count = edge_count + 1;
 
-            long long edge_cost = (new_edge_count < (int)prime.size() && prime[new_edge_count]) ? 3LL * w2 : (long
-long)w1;
+            long long edge_cost = (new_edge_count < (int)prime.size() && prime[new_edge_count])
+                                    ? 3LL * w2
+                                    : (long long)w1;
+
             long long new_cost = cost + edge_cost;
 
-            if (visited[neighbor]) continue;
-
             pair<int, int> new_state = {neighbor, new_edge_count};
+
             if (!dist.count(new_state) || dist[new_state] > new_cost) {
                 dist[new_state] = new_cost;
                 parent[new_state] = {node, edge_count};
                 pq.push({new_cost, neighbor, new_edge_count});
             }
-
-            visited[neighbor] = true;
         }
     }
+
 
     if (best_state.first == -1) {
         priority_queue<pair<long long, int>, vector<pair<long long, int>>, greater<>> simple_pq;
