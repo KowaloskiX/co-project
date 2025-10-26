@@ -1,29 +1,19 @@
-#include <iostream>
-#include <vector>
-#include <queue>
-#include <string>
-#include <bitset>
-#include <chrono>
-#include <cmath>
 #include <algorithm>
-#include <map>
-#include <memory>
+#include <chrono>
+#include <cstdint>
+#include <climits>
+#include <functional>
+#include <iostream>
 #include <limits>
+#include <queue>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 using namespace std;
 
-// --- Stałe ---
-const int MAX_N = 100005;
-
-// Zmniejszamy wiązkę, aby rozwiązać problem MLX
-const int BEAM_WIDTH = 5000;
-const double TIME_LIMIT = 18.5;
-const int MAX_SIEVE_LEN = 200000;
-const long long INF = numeric_limits<long long>::max();
-const double HEURISTIC_WEIGHT = 1.0;
-
-// --- Struktury danych ---
-
+// ---------------------- Problem types ----------------------
 struct Edge
 {
     int to;
@@ -31,166 +21,386 @@ struct Edge
     int w2;
 };
 
-struct DijkstraEdge
+static inline long long static_cost(int w1, int w2)
 {
-    int to;
-    long long static_cost;
-};
-
-vector<bool> is_prime_sieve;
-vector<long long> min_cost_to_target; // Heurystyka A* (h)
-
-struct Path
-{
-    int current_node;
-    long long cost;        // 'g' RZECZYWISTE (g_real)
-    long long heuristic_g; // 'g' HEURYSTYCZNE (g_optimistic) - dla TIE-BREAKER
-    int path_len;
-    shared_ptr<Path> parent;
-    bitset<MAX_N> visited;
-
-    Path(int start_node)
-        : current_node(start_node), cost(0), heuristic_g(0), path_len(0), parent(nullptr)
-    {
-        visited[start_node] = true;
-    }
-
-    Path(const shared_ptr<Path> &parent_ptr, const Edge &edge, long long edge_cost, long long static_edge_cost)
-    {
-        this->current_node = edge.to;
-        this->path_len = parent_ptr->path_len + 1;
-        this->parent = parent_ptr;
-        this->cost = parent_ptr->cost + edge_cost;
-        this->heuristic_g = parent_ptr->heuristic_g + static_edge_cost;
-        this->visited = parent_ptr->visited;
-        this->visited[edge.to] = true;
-    }
-};
-
-using PathPtr = shared_ptr<Path>;
-
-// --- Heurystyka A* ---
-
-inline long long heuristic(int node)
-{
-    return min_cost_to_target[node]; // h
+    return min<long long>(w1, 3LL * w2);
 }
 
-/**
- * @brief Oblicza f(p) = g_real + h
- */
-inline long long get_f_cost(const PathPtr &p)
-{
-    long long h_cost = heuristic(p->current_node);
-    if (h_cost == INF)
-        return INF;
+static const long long INF = (1LL << 62);
 
-    // POWRÓT DO LEPSZEJ FORMUŁY: f = g_real + h
-    if (p->cost > INF - h_cost)
-        return INF;
-    return p->cost + h_cost;
-}
-
-/**
- * @brief Komparator dla Max-Heap z wielopoziomowym TIE-BREAKEREM.
- */
-struct ComparePathPtrMax
+// ---------------------- Prime helper ----------------------
+struct Prime
 {
-    bool operator()(const PathPtr &a, const PathPtr &b)
+    vector<char> is; // is[n] == 1 if prime
+    void ensure(int n)
     {
-        // Poziom 1: Sortuj po f = g_real + h
-        long long f_a = get_f_cost(a);
-        long long f_b = get_f_cost(b);
-        if (f_a != f_b)
+        if (n < 2)
         {
-            return f_a < f_b; // Gorszy = większy f_cost
+            is.assign(3, 0);
+            is[2] = 1;
+            return;
         }
-
-        // Poziom 2 (Tie-Breaker): f jest równe. Sortuj po g_optimistic.
-        // Wolimy ścieżki o niższym koszcie optymistycznym (lepszy potencjał).
-        if (a->heuristic_g != b->heuristic_g)
+        if ((int)is.size() > n)
+            return;
+        vector<char> tmp(n + 1, true);
+        tmp[0] = tmp[1] = false;
+        for (long long p = 2; p * p <= n; ++p)
         {
-            return a->heuristic_g > b->heuristic_g; // Gorszy = większy g_optimistic
+            if (tmp[(int)p])
+            {
+                for (long long x = p * p; x <= n; x += p)
+                    tmp[(int)x] = false;
+            }
         }
-
-        // Poziom 3 (Tie-Breaker): Oba koszty równe. Sortuj po h.
-        // Wolimy ścieżki bliżej celu (niższe h).
-        return heuristic(a->current_node) > heuristic(b->current_node);
+        is.swap(tmp);
     }
-};
-
-// --- Funkcje pomocnicze ---
-
-bool is_prime_slow(int n)
-{
-    if (n <= 1)
-        return false;
-    for (long long i = 2; i * i <= n; ++i)
+    inline bool operator()(int x)
     {
-        if (n % i == 0)
+        if (x < 0)
             return false;
+        if (x >= (int)is.size())
+            ensure(x);
+        return is[x];
+    }
+};
+
+// ---------------------- Heuristics ----------------------
+vector<long long> reverse_dijkstra(int N, int target, const vector<vector<Edge>> &adj)
+{
+    vector<vector<pair<int, long long>>> rev(N);
+    for (int u = 0; u < N; ++u)
+    {
+        for (const auto &e : adj[u])
+        {
+            rev[e.to].push_back({u, static_cost(e.w1, e.w2)});
+        }
+    }
+    vector<long long> dist(N, INF);
+    priority_queue<pair<long long, int>, vector<pair<long long, int>>, greater<pair<long long, int>>> pq;
+    dist[target] = 0;
+    pq.push({0, target});
+    while (!pq.empty())
+    {
+        auto [d, u] = pq.top();
+        pq.pop();
+        if (d != dist[u])
+            continue;
+        for (auto &pr : rev[u])
+        {
+            int v = pr.first;
+            long long w = pr.second;
+            if (dist[v] > d + w)
+            {
+                dist[v] = d + w;
+                pq.push({dist[v], v});
+            }
+        }
+    }
+    return dist;
+}
+
+vector<int> bfs_hops_to_target(int N, int target, const vector<vector<Edge>> &adj)
+{
+    vector<int> hops(N, -1);
+    queue<int> q;
+    q.push(target);
+    hops[target] = 0;
+    while (!q.empty())
+    {
+        int u = q.front();
+        q.pop();
+        for (const auto &e : adj[u])
+        {
+            int v = e.to;
+            if (hops[v] == -1)
+            {
+                hops[v] = hops[u] + 1;
+                q.push(v);
+            }
+        }
+    }
+    return hops;
+}
+
+// ---------------------- Path validation & utilities ----------------------
+static inline bool edge_exists(const vector<vector<Edge>> &adj, int u, int v)
+{
+    for (const auto &e : adj[u])
+        if (e.to == v)
+            return true;
+    return false;
+}
+
+static bool validate_path_simple(const vector<int> &path, int S, int T, const vector<vector<Edge>> &adj)
+{
+    if (path.empty())
+        return false;
+    if (path.front() != S)
+        return false;
+    if (path.back() != T)
+        return false;
+    unordered_set<int> seen;
+    seen.reserve(path.size() * 2);
+    for (size_t i = 0; i < path.size(); ++i)
+    {
+        int u = path[i];
+        if (u < 0 || u >= (int)adj.size())
+            return false;
+        if (!seen.insert(u).second)
+            return false; // repeated vertex -> not simple
+        if (i)
+        {
+            if (!edge_exists(adj, path[i - 1], u))
+                return false;
+        }
     }
     return true;
 }
 
-void sieve(int max_n)
+static long long true_blackie_cost(const vector<int> &path, const vector<vector<Edge>> &adj, Prime &prime)
 {
-    is_prime_sieve.assign(max_n + 1, true);
-    is_prime_sieve[0] = is_prime_sieve[1] = false;
-    for (int p = 2; p * p <= max_n; p++)
+    if (path.size() <= 1)
+        return 0;
+    long long sum = 0;
+    for (size_t i = 1; i < path.size(); ++i)
     {
-        if (is_prime_sieve[p])
+        int u = path[i - 1], v = path[i];
+        int step = (int)i; // e1 is step 1, etc.
+        long long best_edge = INF;
+        for (const auto &e : adj[u])
         {
-            for (int i = p * p; i <= max_n; i += p)
-                is_prime_sieve[i] = false;
+            if (e.to != v)
+                continue;
+            long long c = prime(step) ? (3LL * e.w2) : (long long)e.w1;
+            if (c < best_edge)
+                best_edge = c;
+        }
+        // graph guaranteed to have an edge u->v (validated before)
+        sum += best_edge;
+    }
+    return sum;
+}
+
+// ---------------------- Fallback path (static-cost Dijkstra) ----------------------
+vector<int> dijkstra_static_path(int N, int s, int t, const vector<vector<Edge>> &adj)
+{
+    vector<long long> dist(N, INF);
+    vector<int> parent(N, -1);
+    priority_queue<pair<long long, int>, vector<pair<long long, int>>, greater<pair<long long, int>>> pq;
+    dist[s] = 0;
+    pq.push({0, s});
+    while (!pq.empty())
+    {
+        auto [d, u] = pq.top();
+        pq.pop();
+        if (d != dist[u])
+            continue;
+        if (u == t)
+            break;
+        for (const auto &e : adj[u])
+        {
+            long long w = static_cost(e.w1, e.w2);
+            if (dist[e.to] > d + w)
+            {
+                dist[e.to] = d + w;
+                parent[e.to] = u;
+                pq.push({dist[e.to], e.to});
+            }
         }
     }
+    vector<int> path;
+    if (dist[t] == INF)
+        return path;
+    for (int v = t; v != -1; v = parent[v])
+        path.push_back(v);
+    reverse(path.begin(), path.end());
+    return path;
 }
 
-long long get_edge_cost(int w1, int w2, int path_index)
+// ---------------------- A* over layered states (node, steps) ----------------------
+struct AStarResult
 {
-    bool is_p;
-    if (path_index < is_prime_sieve.size())
+    vector<int> path;
+    long long cost = -1;
+};
+struct KeyHash
+{
+    size_t operator()(const uint64_t &k) const noexcept { return (size_t)(k ^ (k >> 33)); }
+};
+
+// Label skyline per node: (steps, g) non-dominated
+static inline bool dominated_and_update(vector<vector<pair<int, long long>>> &lab, int u, int s, long long g)
+{
+    auto &vec = lab[u];
+    // dominated by existing?
+    for (auto &p : vec)
     {
-        is_p = is_prime_sieve[path_index];
+        if (p.first <= s && p.second <= g)
+            return true; // dominated
     }
-    else
+    // remove labels dominated by (s,g)
+    int w = 0;
+    for (int i = 0; i < (int)vec.size(); ++i)
     {
-        is_p = is_prime_slow(path_index);
+        auto &p = vec[i];
+        if (s <= p.first && g <= p.second)
+            continue; // dominated -> skip
+        vec[w++] = p;
     }
-    return is_p ? (3LL * w2) : (1LL * w1);
+    vec.resize(w);
+    vec.push_back({s, g});
+    return false;
 }
 
-// Zwraca optymistyczny koszt krawędzi (dla heurystyki i tie-breakera)
-inline long long get_static_cost(int w1, int w2)
+AStarResult astar_limited(
+    int N, int s, int t,
+    const vector<vector<Edge>> &adj,
+    const vector<long long> &h,        // admissible heuristic (static reverse Dijkstra)
+    const vector<int> &hops_to_target, // to cap length window
+    Prime &prime,
+    int Lmax,
+    double weight_h,
+    chrono::steady_clock::time_point hard_deadline,
+    long long incumbent_upper_bound // use a real, valid UB to prune hard
+)
 {
-    return min((long long)w1, 3LL * w2);
-}
-
-void print_path(PathPtr solution)
-{
-    if (solution == nullptr)
+    struct StateRec
     {
-        cout << "0\n\n";
-        return;
+        int node;
+        int steps;
+        int parent_id;
+    };
+    vector<StateRec> states;
+    states.reserve(1 << 20);
+    states.push_back({s, 0, -1}); // id 0
+
+    vector<long long> gval;
+    gval.reserve(1 << 20);
+    gval.push_back(0);
+
+    struct PQN
+    {
+        long long f, g;
+        int id;
+        bool operator<(PQN const &o) const
+        {
+            if (f != o.f)
+                return f > o.f;
+            return g > o.g;
+        }
+    };
+    priority_queue<PQN> open;
+    auto f0 = (long long)(gval[0] + weight_h * (h[s] == INF ? (long long)4e18 : h[s]));
+    open.push({f0, 0, 0});
+
+    // skyline labels per node
+    vector<vector<pair<int, long long>>> labels(N); // typically very small
+    labels[s].push_back({0, 0});
+
+    long long incumbent_cost = incumbent_upper_bound; // start with real UB
+    int incumbent_id = -1;
+
+    // helper: simple-path enforcement (no repeated vertices)
+    auto repeats_on_chain = [&](int id, int v) -> bool
+    {
+        for (int cur = id; cur != -1; cur = states[cur].parent_id)
+        {
+            if (states[cur].node == v)
+                return true;
+        }
+        return false;
+    };
+
+    while (!open.empty())
+    {
+        if (chrono::steady_clock::now() > hard_deadline)
+            break;
+
+        auto top = open.top();
+        open.pop();
+        long long g = top.g;
+        int id = top.id;
+        if (gval[id] != g)
+            continue; // stale
+
+        int u = states[id].node;
+        int steps = states[id].steps;
+
+        // global B&B
+        if (g >= incumbent_cost)
+            continue;
+
+        // f-based early exit (if proven optimal within this Lmax & weight)
+        if (u == t)
+        {
+            // we keep only if improves the UB; but record parent for reconstruction too
+            if (g < incumbent_cost)
+            {
+                incumbent_cost = g;
+                incumbent_id = id;
+            }
+            if (!open.empty() && open.top().f >= incumbent_cost)
+                break;
+            continue;
+        }
+
+        // neighbors (already presorted by static cost)
+        for (const auto &e : adj[u])
+        {
+            int v = e.to;
+            if (v == u)
+                continue; // self loop
+            // avoid immediate backtrack
+            if (states[id].parent_id != -1 && states[states[id].parent_id].node == v)
+                continue;
+            // enforce simple path
+            if (repeats_on_chain(id, v))
+                continue;
+
+            // unreachable tail from v?
+            int ht = hops_to_target[v];
+            if (ht == -1)
+                continue;
+            int next_steps = steps + 1;
+            if (next_steps + ht > Lmax)
+                continue;
+            if (h[v] == INF)
+                continue;
+
+            long long edge_cost = prime(next_steps) ? (3LL * e.w2) : (long long)e.w1;
+            long long ng = g + edge_cost;
+            if (ng >= incumbent_cost)
+                continue;
+
+            // skyline dominance at v
+            if (dominated_and_update(labels, v, next_steps, ng))
+                continue;
+
+            states.push_back({v, next_steps, id});
+            gval.push_back(ng);
+            long long hh = h[v];
+            long long ff = ng + (long long)(weight_h * (hh == INF ? (long long)4e18 : hh));
+            open.push({ff, ng, (int)states.size() - 1});
+        }
+    }
+
+    AStarResult res;
+    if (incumbent_id == -1)
+    {
+        res.cost = -1;
+        return res;
     }
     vector<int> nodes;
-    PathPtr current = solution;
-    while (current != nullptr)
-    {
-        nodes.push_back(current->current_node);
-        current = current->parent;
-    }
+    for (int cur = incumbent_id; cur != -1; cur = states[cur].parent_id)
+        nodes.push_back(states[cur].node);
     reverse(nodes.begin(), nodes.end());
-    cout << nodes.size() << "\n";
-    for (size_t i = 0; i < nodes.size(); ++i)
-    {
-        cout << nodes[i] << (i == nodes.size() - 1 ? "" : " ");
-    }
-    cout << "\n";
+    res.path = std::move(nodes);
+    res.cost = incumbent_cost;
+    return res;
 }
 
-void print_bfs_path(const vector<int> &path)
+// ---------------------- Output ----------------------
+static inline void print_path(const vector<int> &path)
 {
     if (path.empty())
     {
@@ -200,203 +410,139 @@ void print_bfs_path(const vector<int> &path)
     cout << path.size() << "\n";
     for (size_t i = 0; i < path.size(); ++i)
     {
-        cout << path[i] << (i == path.size() - 1 ? "" : " ");
+        if (i)
+            cout << ' ';
+        cout << path[i];
     }
     cout << "\n";
 }
 
-// --- Funkcje Obliczeniowe (Heurystyka i Fallback) ---
-
-void precalculate_heuristic_dijkstra(int N, int end_node, const vector<vector<DijkstraEdge>> &adj_rev)
-{
-    min_cost_to_target.assign(N, INF);
-    priority_queue<pair<long long, int>, vector<pair<long long, int>>, greater<pair<long long, int>>> pq;
-    min_cost_to_target[end_node] = 0;
-    pq.push({0, end_node});
-    while (!pq.empty())
-    {
-        long long d = pq.top().first;
-        int u = pq.top().second;
-        pq.pop();
-        if (d > min_cost_to_target[u])
-            continue;
-        for (const auto &edge : adj_rev[u])
-        {
-            int v = edge.to;
-            long long new_dist = d + edge.static_cost;
-            if (new_dist < min_cost_to_target[v])
-            {
-                min_cost_to_target[v] = new_dist;
-                pq.push({new_dist, v});
-            }
-        }
-    }
-}
-
-vector<int> find_path_bfs_fallback(int N, int start, int dest, const vector<vector<Edge>> &adj)
-{
-    queue<int> q;
-    map<int, int> parent;
-    vector<bool> visited_bfs(N, false);
-    q.push(start);
-    visited_bfs[start] = true;
-    parent[start] = -1;
-    while (!q.empty())
-    {
-        int u = q.front();
-        q.pop();
-        if (u == dest)
-        {
-            vector<int> path;
-            int curr = dest;
-            while (curr != -1)
-            {
-                path.push_back(curr);
-                curr = parent[curr];
-            }
-            reverse(path.begin(), path.end());
-            return path;
-        }
-        for (const auto &edge : adj[u])
-        {
-            if (!visited_bfs[edge.to])
-            {
-                visited_bfs[edge.to] = true;
-                parent[edge.to] = u;
-                q.push(edge.to);
-            }
-        }
-    }
-    return {};
-}
-
-// --- Główna funkcja ---
-
+// ---------------------- Main ----------------------
 int main()
 {
-    ios_base::sync_with_stdio(false);
-    cin.tie(NULL);
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
 
     int N, M;
-    cin >> N >> M;
-    int start_node, end_node;
-    cin >> start_node >> end_node;
+    if (!(cin >> N >> M))
+        return 0;
+    int S, T;
+    cin >> S >> T;
 
     vector<vector<Edge>> adj(N);
-    vector<vector<DijkstraEdge>> adj_rev(N);
-
+    adj.reserve(N);
     for (int i = 0; i < M; ++i)
     {
         int u, v, w1, w2;
         cin >> u >> v >> w1 >> w2;
+        // undirected
         adj[u].push_back({v, w1, w2});
         adj[v].push_back({u, w1, w2});
-
-        long long static_cost = get_static_cost(w1, w2);
-
-        adj_rev[v].push_back({u, static_cost});
-        adj_rev[u].push_back({v, static_cost});
     }
 
-    // 1. Pre-obliczenia
-    sieve(min(MAX_N - 1, MAX_SIEVE_LEN));
-    precalculate_heuristic_dijkstra(N, end_node, adj_rev);
-    auto start_time = chrono::high_resolution_clock::now();
-
-    // 2. Inicjalizacja LBS
-    vector<PathPtr> current_beams;
-    current_beams.push_back(make_shared<Path>(start_node));
-
-    PathPtr best_solution = nullptr;
-    long long min_solution_cost = -1;
-
-    using CappedPQ = priority_queue<PathPtr, vector<PathPtr>, ComparePathPtrMax>;
-
-    // 3. Pętla Beam Search
-    while (true)
+    // Presort adjacency by static-cost ascending => better incumbents early
+    for (int u = 0; u < N; ++u)
     {
-        auto now = chrono::high_resolution_clock::now();
-        chrono::duration<double> elapsed = now - start_time;
-        if (elapsed.count() > TIME_LIMIT)
-            break;
-        if (current_beams.empty())
-            break;
+        auto &vec = adj[u];
+        stable_sort(vec.begin(), vec.end(), [](const Edge &a, const Edge &b)
+                    {
+            long long ca = static_cost(a.w1, a.w2);
+            long long cb = static_cost(b.w1, b.w2);
+            if (ca != cb) return ca < cb;
+            return a.to < b.to; });
+    }
 
-        CappedPQ next_beam_candidates;
+    const double TIME_LIMIT = 18.5; // leave headroom under 20s
+    auto start_tp = chrono::steady_clock::now();
+    auto deadline = start_tp + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                   std::chrono::duration<double>(TIME_LIMIT));
 
-        for (const auto &parent_path : current_beams)
+    vector<long long> h = reverse_dijkstra(N, T, adj);
+    vector<int> hops_to_target = bfs_hops_to_target(N, T, adj);
+    Prime prime;
+
+    // Always-valid fallback (static-cost Dijkstra)
+    vector<int> best_path = dijkstra_static_path(N, S, T, adj);
+    if (!validate_path_simple(best_path, S, T, adj))
+    {
+        cout << "0\n\n"; // graph disconnected or malformed
+        return 0;
+    }
+
+    // Strong UB: true Blackie cost of fallback
+    prime.ensure((int)best_path.size() + 10);
+    long long best_cost = true_blackie_cost(best_path, adj, prime);
+
+    int min_hops = hops_to_target[S];
+    if (min_hops == -1)
+    { // disconnected
+        print_path(best_path);
+        return 0;
+    }
+
+    // Adaptive Lmax schedule based on min_hops and fallback length
+    int Lfb = (int)best_path.size() - 1;
+    vector<int> Ls;
+    Ls.push_back(min_hops);
+    if (Lfb > min_hops)
+    {
+        Ls.push_back(min(Lfb, min_hops + 50));
+        Ls.push_back(min(Lfb, min_hops + 120));
+        Ls.push_back(min(Lfb, min_hops + 240));
+        Ls.push_back(min(Lfb, min_hops + 400));
+    }
+    // A little beyond fallback if time allows:
+    Ls.push_back(min(Lfb + 20, min_hops + 600));
+    Ls.push_back(min(Lfb + 60, min_hops + 800));
+
+    // Phase 1: fast good incumbents
+    const double W1[] = {1.6, 1.25, 1.1};
+    for (int Lmax : Ls)
+    {
+        if (chrono::steady_clock::now() > deadline)
+            break;
+        prime.ensure(Lmax + 10);
+        for (double w : W1)
         {
-            int u = parent_path->current_node;
-
-            // Używamy f = g_real + h do przycinania
-            long long f_p = get_f_cost(parent_path);
-            if (f_p == INF || (best_solution != nullptr && f_p >= min_solution_cost))
+            if (chrono::steady_clock::now() > deadline)
+                break;
+            AStarResult ar = astar_limited(N, S, T, adj, h, hops_to_target, prime, Lmax, w, deadline, best_cost);
+            if (ar.cost != -1 && validate_path_simple(ar.path, S, T, adj))
             {
-                continue;
-            }
-
-            for (const auto &edge : adj[u])
-            {
-                int v = edge.to;
-
-                if (parent_path->visited[v] == 0)
+                // compute true cost of returned path to avoid any rounding surprises
+                long long tc = true_blackie_cost(ar.path, adj, prime);
+                if (tc < best_cost)
                 {
-
-                    int new_path_len = parent_path->path_len + 1;
-
-                    long long real_edge_cost = get_edge_cost(edge.w1, edge.w2, new_path_len);
-                    long long static_edge_cost = get_static_cost(edge.w1, edge.w2);
-
-                    PathPtr next_path = make_shared<Path>(parent_path, edge, real_edge_cost, static_edge_cost);
-
-                    if (v == end_node)
-                    {
-                        // "Sędzia": Użyj RZECZYWISTEGO kosztu (next_path->cost)
-                        if (min_solution_cost == -1 || next_path->cost < min_solution_cost)
-                        {
-                            min_solution_cost = next_path->cost;
-                            best_solution = next_path;
-                        }
-                    }
-                    else
-                    {
-                        // "Przewodnik": Użyj f = g_real + h
-                        long long f_next = get_f_cost(next_path);
-                        if (f_next == INF)
-                            continue;
-
-                        if (next_beam_candidates.size() < BEAM_WIDTH)
-                        {
-                            next_beam_candidates.push(next_path);
-                        }
-                        else if (f_next < get_f_cost(next_beam_candidates.top()))
-                        {
-                            next_beam_candidates.pop();
-                            next_beam_candidates.push(next_path);
-                        }
-                    }
+                    best_cost = tc;
+                    best_path = std::move(ar.path);
                 }
             }
         }
+    }
 
-        current_beams.clear();
-        while (!next_beam_candidates.empty())
+    // Phase 2: targeted refine (w=1.0) around best length discovered so far
+    if (chrono::steady_clock::now() < deadline)
+    {
+        int Lbest = (int)best_path.size() - 1;
+        vector<int> Lref = {max(min_hops, Lbest), min(Lbest + 20, min_hops + 800)};
+        for (int Lmax : Lref)
         {
-            current_beams.push_back(next_beam_candidates.top());
-            next_beam_candidates.pop();
+            if (chrono::steady_clock::now() > deadline)
+                break;
+            prime.ensure(Lmax + 10);
+            AStarResult ar = astar_limited(N, S, T, adj, h, hops_to_target, prime, Lmax, 1.0, deadline, best_cost);
+            if (ar.cost != -1 && validate_path_simple(ar.path, S, T, adj))
+            {
+                long long tc = true_blackie_cost(ar.path, adj, prime);
+                if (tc < best_cost)
+                {
+                    best_cost = tc;
+                    best_path = std::move(ar.path);
+                }
+            }
         }
     }
 
-    // 4. Wypisanie wyniku i plan awaryjny
-    if (best_solution != nullptr)
-    {
-        print_path(best_solution);
-    }
-    else
-    {
-        vector<int> bfs_path = find_path_bfs_fallback(N, start_node, end_node, adj);
-        print_bfs_path(bfs_path.empty() ? vector<int>{start_node} : bfs_path);
-    }
-
+    print_path(best_path);
     return 0;
 }
