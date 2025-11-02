@@ -1,6 +1,10 @@
 {
     "files.associations": {
         "*.sql": "sql",
-        "tuple": "cpp"
+        "tuple": "cpp",
+        "iostream": "cpp",
+        "bitset": "cpp",
+        "queue": "cpp",
+        "vector": "cpp"
     }
 }

@@ -305,7 +305,7 @@ int main()
   int N, M;
   cin >> N >> M;
 
-  if(N<50000){  
+  if(N<50500){  
   int start_node, end_node;
   cin >> start_node >> end_node;
 
