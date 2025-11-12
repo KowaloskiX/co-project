@@ -326,3 +326,11 @@ It does this in **three phases**:
     - Print the number of nodes in `global_best_path`.
     - Print all node IDs in order, space-separated.
     - Exit.
+
+## Authors and responsibilities
+
+- **Hubert Plewa**: Responsible for precomputation and utility functions, including the prime sieve (`sieve_primes`), cost calculations (`static_cost`, `step_cost`), path cost evaluation (`calculate_blackie_length`), path reconstruction (`reconstruct_path`) and the reverse Dijkstra heuristic (`calculate_reverse_dijkstra_heuristic`).
+
+- **Łukasz Kowalski**: Responsible for the seeding phase, including implementing the static cost Dijkstra (`dijkstra_static_path`) and the alpha-weighted Dijkstras (`dijkstra_alpha`) with various alpha values to generate initial approximate paths and set the global best solution.
+
+- **Wiktor Smura**: Responsible for implementing state encoding (`encode_state`), cycle detection (`BoundedCheckCycle`), the main A* search implementation (`find_path_iterative`), including state management, pruning, dominance checks, and integrating the iterative weighted A* runs in the main function, as well as overall code structure and time management.
