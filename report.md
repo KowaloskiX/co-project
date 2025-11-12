@@ -52,10 +52,10 @@ It does this in **three phases**:
 - `auto t_start = chrono::steady_clock::now();`
   Start timestamp of the program, used for runtime checks.
 
-- `const double TIME_LIMIT_TOTAL = 19.0;`
-  Time budget (seconds) for the entire computation, below the problem’s 20s limit for safety.
+- `const double TIME_LIMIT_TOTAL = 19.0 [174.0 for long];`
+  Time budget (seconds) for the entire computation, below the problem’s 20s [180s for long] limit for safety.
 
-- `const double TIME_LIMIT_SEEDING = 5.0;`
+- `const double TIME_LIMIT_SEEDING = 5.0 [140.0 for long];`
   Time budget (seconds) reserved for the seeding phase (the approximate Dijkstras).
 
 - `long long loop_counter = 0;`
