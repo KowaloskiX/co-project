@@ -1,0 +1,1 @@
+g++ -O3 -DNDEBUG -march=native -std=gnu++17 -o main ultimate_god_code_long.cpp
